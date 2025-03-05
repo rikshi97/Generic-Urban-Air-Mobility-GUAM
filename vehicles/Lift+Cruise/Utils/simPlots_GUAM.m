@@ -348,4 +348,77 @@ legend('x','y','z');
 grid on
 zoom on
 
+% Create output folder if it doesn't exist
+outputFolder = 'output_figures';
+if ~exist(outputFolder, 'dir')
+    mkdir(outputFolder);
+end
 
+% Generate and save each figure
+figures = {};
+figureNames = {'Altitude_Reference', 'Pitch_Angle', 'Pitch_Rate', 'Velocity_Body_X', 'Velocity_Body_Z', 'Position_X', 'Position_Z', 'Actuator_Inputs', 'Propulsion_Command', 'Wind_Disturbance'};
+
+figures{1} = figure;
+plot(time, altitude_ref, 'r', time, altitude, 'b');
+title('Altitude Reference vs. Altitude');
+xlabel('Time (s)'); ylabel('Altitude (m)');
+legend('Reference', 'Actual');
+saveas(figures{1}, fullfile(outputFolder, 'Altitude_Reference.png'));
+
+figures{2} = figure;
+plot(time, pitch_angle_ref, 'r', time, pitch_angle, 'b');
+title('Pitch Angle Reference vs. Pitch Angle');
+xlabel('Time (s)'); ylabel('Pitch Angle (deg)');
+legend('Reference', 'Actual');
+saveas(figures{2}, fullfile(outputFolder, 'Pitch_Angle.png'));
+
+figures{3} = figure;
+plot(time, pitch_rate_ref, 'r', time, pitch_rate, 'b');
+title('Pitch Rate Reference vs. Pitch Rate');
+xlabel('Time (s)'); ylabel('Pitch Rate (deg/s)');
+legend('Reference', 'Actual');
+saveas(figures{3}, fullfile(outputFolder, 'Pitch_Rate.png'));
+
+figures{4} = figure;
+plot(time, velocity_body_x);
+title('Velocity in Body X Direction');
+xlabel('Time (s)'); ylabel('Velocity (m/s)');
+saveas(figures{4}, fullfile(outputFolder, 'Velocity_Body_X.png'));
+
+figures{5} = figure;
+plot(time, velocity_body_z);
+title('Velocity in Body Z Direction');
+xlabel('Time (s)'); ylabel('Velocity (m/s)');
+saveas(figures{5}, fullfile(outputFolder, 'Velocity_Body_Z.png'));
+
+figures{6} = figure;
+plot(time, position_x);
+title('Position X');
+xlabel('Time (s)'); ylabel('Position (m)');
+saveas(figures{6}, fullfile(outputFolder, 'Position_X.png'));
+
+figures{7} = figure;
+plot(time, position_z);
+title('Position Z');
+xlabel('Time (s)'); ylabel('Position (m)');
+saveas(figures{7}, fullfile(outputFolder, 'Position_Z.png'));
+
+figures{8} = figure;
+plot(time, actuator_inputs);
+title('Actuator Inputs');
+xlabel('Time (s)'); ylabel('Input Value');
+saveas(figures{8}, fullfile(outputFolder, 'Actuator_Inputs.png'));
+
+figures{9} = figure;
+plot(time, propulsion_command);
+title('Propulsion Command');
+xlabel('Time (s)'); ylabel('Command Value');
+saveas(figures{9}, fullfile(outputFolder, 'Propulsion_Command.png'));
+
+figures{10} = figure;
+plot(time, wind_disturbance);
+title('Wind Disturbance');
+xlabel('Time (s)'); ylabel('Disturbance Value');
+saveas(figures{10}, fullfile(outputFolder, 'Wind_Disturbance.png'));
+
+close(figures{:});  % Close all figures after saving

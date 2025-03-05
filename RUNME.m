@@ -11,7 +11,7 @@ switch u_choice
     case 3
         exam_TS_Cruise_Climb_Turn_traj
     case 4
-        exam_RAMP
+        waypoint_bezier
     case 5 
         if ~exist("userStruct",'var')
             addpath('./Bez_Functions/');
