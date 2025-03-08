@@ -1,0 +1,39 @@
+Metadata-Version: 2.2
+Name: jax-guam
+Version: 0.0.1
+Summary: Jax GUAM dynamics
+Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
+Classifier: Programming Language :: Python
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: jax
+Requires-Dist: jaxtyping
+Requires-Dist: matplotlib
+Requires-Dist: tqdm
+Requires-Dist: loguru
+Requires-Dist: attrs
+Requires-Dist: ipdb
+
+<div align="center">
+
+# Jax GUAM
+
+[Installation](#installation) •
+[Quickstart](#quickstart) •
+
+</div>
+
+
+## Installation
+Make sure [jax](https://github.com/google/jax#installation) and [jaxtyping](https://github.com/google/jaxtyping) are installed.
+In the root folder, run
+```shell
+pip install -e .
+```
+
+## Quickstart
+
+```bash
+python scripts/simulate_batch.py
+python scripts/plot_batch.py
+```

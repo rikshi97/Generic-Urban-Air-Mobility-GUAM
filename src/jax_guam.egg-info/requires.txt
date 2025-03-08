@@ -1,0 +1,7 @@
+jax
+jaxtyping
+matplotlib
+tqdm
+loguru
+attrs
+ipdb
