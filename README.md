@@ -2,6 +2,8 @@
 
 # Jax GUAM
 
+This project is a fork of [jax_guam](https://github.com/oswinso/jax_guam).
+
 [Installation](#installation) •
 [Quickstart](#quickstart) •
 
