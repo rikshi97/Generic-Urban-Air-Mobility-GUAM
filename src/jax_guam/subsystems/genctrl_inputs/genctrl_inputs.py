@@ -4,10 +4,62 @@ import numpy as np
 from jax_guam.guam_types import RefInputs
 from jax_guam.utils.batch_spline import get_spline
 
+from scipy.spatial.transform import rotation as R
+from geopy.distance import geodesic
+
+def lla_to_enu(lat, lon, alt, ref_lat, ref_lon, ref_alt):
+    """
+    Convert latitude, longitude, altitude (LLA) to East-North-Up (ENU) coordinates
+    relative to a reference point (ref_lat, ref_lon, ref_alt).
+    """
+    d_east, d_north = geodesic((ref_lat, ref_lon), (lat, ref_lon)).meters, geodesic((ref_lat, ref_lon), (ref_lat, lon)).meters
+    d_up = alt - ref_alt
+    return np.array([d_east, d_north, d_up])
+
+def generate_trajectory(lla_waypoints, speed=10.0):
+    """
+    Generate a trajectory in ENU coordinates from LLA waypoints with a given speed.
+    """
+    ref_lat, ref_lon, ref_alt = lla_waypoints[0]  # Reference point
+    enu_waypoints = np.array([lla_to_enu(lat, lon, alt, ref_lat, ref_lon, ref_alt) for lat, lon, alt in lla_waypoints])
+    
+    # Compute distances between waypoints
+    distances = np.linalg.norm(np.diff(enu_waypoints, axis=0), axis=1)
+    
+    # Compute time intervals assuming constant speed
+    time_intervals = distances / speed  # Time to travel each segment
+    T_t = np.insert(np.cumsum(time_intervals), 0, 0)  # Start time at 0
+    
+    # Compute velocity waypoints
+    T_vel_bIc = np.vstack([np.diff(enu_waypoints, axis=0) / time_intervals[:, None], np.zeros((1, 3))])
+    
+    return T_t, enu_waypoints, T_vel_bIc
+
+def lift_cruise_reference_inputs_from_lla(time, lla_waypoints, speed=10.0):
+    """
+    Generate reference inputs using LLA waypoints.
+    """
+    T_t, T_pos_bii, T_vel_bIc = generate_trajectory(lla_waypoints, speed)
+    T_scale = T_t[-1]
+    
+    # Create splines for smooth trajectory
+    spl_vel_bIc = get_spline(T_t / T_scale, T_vel_bIc, k=1, s=0)
+    spl_pos_bii = get_spline(T_t / T_scale, T_pos_bii, k=1, s=0)
+    
+    vel_bIc = spl_vel_bIc(time / T_scale)
+    pos_bii = spl_pos_bii(time / T_scale)
+    
+    assert vel_bIc.shape == (3,) and pos_bii.shape == (3,)
+    
+    return RefInputs(vel_bIc, pos_bii, Chi_des=np.array(0.0), Chi_dot_des=np.array(0.0))
+
+
 
 def lift_cruise_reference_inputs(time):
     # return lift_cruise_reference_inputs_1(time)
     return lift_cruise_reference_inputs_2(time)
+   # return reference_inputs_from_lla(time, [(0, 0, 0), (0, 0, -80), (150, 0, -100)], speed=10.0)
+   
 
 
 def lift_cruise_reference_inputs_1(time):

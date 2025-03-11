@@ -7,7 +7,7 @@ import jax.tree_util as jtu
 import numpy as np
 import tqdm
 from jax_guam.functional.guam_new import FuncGUAM, GuamState
-from jax_guam.subsystems.genctrl_inputs.genctrl_inputs import lift_cruise_reference_inputs
+from jax_guam.subsystems.genctrl_inputs.genctrl_inputs import lift_cruise_reference_inputs_from_lla, lift_cruise_reference_inputs
 from jax_guam.utils.jax_utils import jax2np, jax_use_cpu, jax_use_double
 from jax_guam.utils.logging import set_logger_format
 from loguru import logger
@@ -19,12 +19,19 @@ def main():
     set_logger_format()
 
     final_time = 45.0
+    
+    lla_waypoints = np.array([
+    [37.42, -122.05, 0],
+    [37.42, -122.05, 500], # NASA Ames
+    [37.87, -122.27, 500],   # UCB
+    [37.87, -122.27, 0]
+    ])
 
     logger.info("Constructing GUAM...")
     guam = FuncGUAM()
     logger.info("Calling GUAM...")
 
-    batch_size = 4096
+    batch_size = 1
     # batch_size = 8192
     # batch_size = 16_384
     state = GuamState.create()
@@ -43,7 +50,8 @@ def main():
         b_state = b_state0
         for kk in tqdm.trange(T):
             t = kk * guam.dt
-            ref_inputs = lift_cruise_reference_inputs(t)
+            #ref_inputs = lift_cruise_reference_inputs(t)
+            ref_inputs = lift_cruise_reference_inputs_from_lla(T, lla_waypoints, speed=20.0)
             b_state = vmap_step(b_state, ref_inputs)
             Tb_state.append(jax2np(b_state))
         bT_state = jtu.tree_map(lambda *args: np.stack(list(args), axis=1), *Tb_state)
