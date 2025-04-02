@@ -6,9 +6,9 @@ from jaxtyping import Array, Bool, Float, Int
 Arr = Union[np.ndarray, Array]
 
 AnyFloat = Float[Arr, "*"]
-FloatScalar = float | Float[Arr, ""]
-IntScalar = int | Int[Arr, ""]
-BoolScalar = bool | Bool[Arr, ""]
+FloatScalar = Union[float, Float[Arr, ""]]
+IntScalar = Union[int, Int[Arr, ""]]
+BoolScalar = Union[bool, Bool[Arr, ""]]
 
 Vec1 = Float[Arr, "1"]
 Vec2 = Float[Arr, "2"]
