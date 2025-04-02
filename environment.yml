@@ -1,0 +1,19 @@
+name: guam
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - plotly
+  - ipdb
+  - geopy
+  - loguru
+  - pip:
+    - jax
+    - jaxlib
+    - keplergl

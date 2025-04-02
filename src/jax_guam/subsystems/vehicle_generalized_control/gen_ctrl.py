@@ -278,49 +278,52 @@ class L_C_control:
         Omeg_BIb = sensor.Omeg_BIb
 
         # [ Roll, Pitch, Yaw ]
-        # eta = sensor.Euler
-        # eta = jnp.array([[eta.phi], [eta.theta], [eta.psi]])
         eta = sensor.Euler.as_vec3_1()
 
         Vel_bIc_cmd = refInputs.Vel_bIc_des.reshape((3, 1))
         chi_dot_des = refInputs.Chi_dot_des
         Vel_bIc_0 = X0[:3]
         Omeg_BIb_0 = X0[3:6]
-        # Accel_bIb_0 = X0[6:9]
         eta_0 = X0[9:12]
 
-        # p_t = (Omeg_BIb - Omeg_BIb_0)[0]
-        # q_t = (Omeg_BIb - Omeg_BIb_0)[1]
-        # r_t = (Omeg_BIb - Omeg_BIb_0)[2]
         pqr_t: Vec3_1 = Omeg_BIb - Omeg_BIb_0
         p_t, q_t, r_t = pqr_t
 
         Vel_blc = Vel_blc.reshape((3, 1))
         e_pos_blc = e_pos_blc.reshape((3, 1))
 
-        # Note: Represent the CURRENT velocity in control frame after subtracting trim.
-        # ubar_t = (Vel_blc - Vel_bIc_0)[0]
-        # vbar_t = (Vel_blc - Vel_bIc_0)[1]
-        # wbar_t = (Vel_blc - Vel_bIc_0)[2]
+        # Current velocity error in control frame after subtracting trim
         uvw_bar_t: Vec3_1 = Vel_blc - Vel_bIc_0
         ubar_t, vbar_t, wbar_t = uvw_bar_t
 
-        # Note: Desired? velocity in control frame, including a p controller from position.
-        # ubar_cmd_t = (Vel_bIc_cmd - Vel_bIc_0 + e_pos_blc * jnp.array([[0.1], [0.1], [0.1]]))[0]
-        # vbar_cmd_t = (Vel_bIc_cmd - Vel_bIc_0 + e_pos_blc * jnp.array([[0.1], [0.1], [0.1]]))[1]
-        # wbar_cmd_t = (Vel_bIc_cmd - Vel_bIc_0 + e_pos_blc * jnp.array([[0.1], [0.1], [0.1]]))[2]
-        Kp_uvw_epos = np.array([0.1, 0.1, 0.1])[:, None]
-        uvw_bar_cmd_t = (Vel_bIc_cmd - Vel_bIc_0) + e_pos_blc * Kp_uvw_epos
+        # LQT-based position-velocity cascaded control approach
+        # 1. Position tracking gains - higher values for better waypoint tracking
+        Kp_uvw_epos = np.array([0.5, 0.5, 0.5])[:, None]  # Increased from 0.1
+        
+        # 2. Position error damping - prevents overshooting waypoints
+        Kd_uvw_epos = np.array([0.2, 0.2, 0.2])[:, None]
+        
+        # 3. Saturate position error contribution to prevent extreme velocities
+        pos_error_contribution = e_pos_blc * Kp_uvw_epos
+        # Clip maximum position error contribution to velocity
+        max_pos_vel = np.array([20.0, 20.0, 20.0])[:, None]  # Max 20 m/s from position error
+        pos_error_contribution = jnp.clip(pos_error_contribution, -max_pos_vel, max_pos_vel)
+        
+        # 4. Generate desired velocity combining reference and position control
+        uvw_bar_cmd_t = (Vel_bIc_cmd - Vel_bIc_0) + pos_error_contribution - uvw_bar_t * Kd_uvw_epos
         ubar_cmd_t, vbar_cmd_t, wbar_cmd_t = uvw_bar_cmd_t
+        
+        # 5. Improved heading control with better gain and damping
+        Kp_chidot_chi = 0.3  # Increased from 0.1
+        Kd_chidot = 0.1  # Added damping term
+        r_damp = r_t * Kd_chidot
+        chi_dot_cmd = chi_dot_des + e_chi * Kp_chidot_chi - r_damp
 
-        Kp_chidot_chi = 0.1
-        chi_dot_cmd = chi_dot_des + e_chi * Kp_chidot_chi
-
-        # phi (roll) and theta (pitch) after subtracting trim.
+        # phi (roll) and theta (pitch) after subtracting trim
         phi_t = (eta - eta_0)[0]
         th_t = (eta - eta_0)[1]
 
-        # import pdb; pdb.set_trace()
+        # Create state vectors for longitudinal and lateral control
         Xlon = jnp.array([ubar_t, wbar_t, q_t, th_t])
         Xlon_cmd = jnp.array([ubar_cmd_t, wbar_cmd_t, [0]])
         Xlat_cmd = jnp.array([vbar_cmd_t, [chi_dot_cmd]])
@@ -333,51 +336,79 @@ class L_C_control:
 
     def directional_control_long_init(self, ctrl_sys: Ctrl_Sys_Lon, R: XLonCmd, X: XLon, feedback):
         """ Linear gain depending on ref state and curr state, with an integral term.
+        With anti-windup protection to prevent integrator saturation.
         """
         Ki = ctrl_sys.Ki
         Kx = ctrl_sys.Kx
         G = ctrl_sys.G
-        mdes = jnp.dot(G, R).reshape(3) + jnp.dot(Ki, self.long_inte) - jnp.dot(Kx, X).reshape(3)
+        
+        # Generate feedforward and feedback components separately
+        feedforward = jnp.dot(G, R).reshape(3)
+        feedback_term = -jnp.dot(Kx, X).reshape(3)
+        integral_term = jnp.dot(Ki, self.long_inte)
+        
+        # Compute the resulting control without integral term
+        mdes_no_integral = feedforward + feedback_term
+        
+        # Anti-windup: Only use integral action when not saturated
+        # Create a softer integration scheme using back-calculation
+        # If integral action would push controls to saturation, reduce its effect
+        max_integral_contribution = 0.3 * jnp.abs(mdes_no_integral)
+        clamped_integral = jnp.clip(integral_term, -max_integral_contribution, max_integral_contribution)
+        
+        # Combine all components for final control signal
+        mdes = mdes_no_integral + clamped_integral
+        
         assert mdes.shape == (3,)
         return mdes
 
     def directional_control_lat_init(self, ctrl_sys: Ctrl_Sys_Lat, R: XLatCmd, X: XLat, feedback):
         """ Linear gain depending on ref state and curr state, with an integral term.
+        With anti-windup protection to prevent integrator saturation.
         """
         Ki = ctrl_sys.Ki
         Kx = ctrl_sys.Kx
         G = ctrl_sys.G
-        mdes = jnp.dot(G, R).reshape(3) + jnp.dot(Ki, self.lat_inte) - jnp.dot(Kx, X).reshape(3)
+        
+        # Generate feedforward and feedback components separately
+        feedforward = jnp.dot(G, R).reshape(3)
+        feedback_term = -jnp.dot(Kx, X).reshape(3)
+        integral_term = jnp.dot(Ki, self.lat_inte)
+        
+        # Compute the resulting control without integral term
+        mdes_no_integral = feedforward + feedback_term
+        
+        # Anti-windup: Only use integral action when not saturated
+        # Create a softer integration scheme using back-calculation
+        # If integral action would push controls to saturation, reduce its effect
+        max_integral_contribution = 0.3 * jnp.abs(mdes_no_integral)
+        clamped_integral = jnp.clip(integral_term, -max_integral_contribution, max_integral_contribution)
+        
+        # Combine all components for final control signal
+        mdes = mdes_no_integral + clamped_integral
+        
         assert mdes.shape == (3,)
         return mdes
 
     def directional_control_long(
         self, feedback: FloatScalar, ctrl_sys_lon: Ctrl_Sys_Lon, Xlon: Vec4_1, Xlon_cmd: Vec3_1
     ):
-        """Error used for the integral term."""
-        # Note: Previously, self.ctrl_sys_lon was used.
+        """Error used for the integral term with improved stability and limiting."""
         Kv = ctrl_sys_lon.Kv
         F = ctrl_sys_lon.F
         C = ctrl_sys_lon.C
         Cv = ctrl_sys_lon.Cv
-        self.long_dot = jnp.dot(F, Xlon_cmd) - jnp.dot(C, Xlon) + jnp.dot(Kv, (feedback - jnp.dot(Cv, Xlon)))
+        
+        # Calculate raw error
+        raw_error = jnp.dot(F, Xlon_cmd) - jnp.dot(C, Xlon) + jnp.dot(Kv, (feedback - jnp.dot(Cv, Xlon)))
+        
+        # Prevent excessive error growth - limit maximum error rate
+        max_error_rate = jnp.array([5.0, 5.0, 5.0])  # Maximum error rate limits
+        
+        # Normalize large errors
+        self.long_dot = jnp.clip(raw_error, -max_error_rate, max_error_rate)
+        
         return self.long_dot
-
-    # def directional_control_long_inte(self, time, y):
-    #     Ki = self.ctrl_sys_lon.Ki
-    #     Kx = self.ctrl_sys_lon.Kx
-    #     G = self.ctrl_sys_lon.G
-    #     mdes_lon = jnp.dot(G, self.Xlon_cmd).reshape(3) + jnp.dot(Ki, y) - jnp.dot(Kx, self.Xlon).reshape(3)
-    #     M_lon = pseudo_inverse(self.ctrl_sys_lon.W, self.ctrl_sys_lon.B)
-    #     out_lon = jnp.dot(M_lon, mdes_lon)
-    #     theta = out_lon[-1]
-    #     Kv = self.ctrl_sys_lon.Kv
-    #     F = self.ctrl_sys_lon.F
-    #     C = self.ctrl_sys_lon.C
-    #     Cv = self.ctrl_sys_lon.Cv
-    #     pdb.set_trace()
-    #     long_dot = (jnp.dot(F, self.Xlon_cmd) - jnp.dot(C, self.Xlon) + jnp.dot(Kv, (theta - jnp.dot(Cv, self.Xlon)))).reshape(3)
-    #     return long_dot
 
     def directional_control_long_inte(self, time, y):
         return self.long_dot.reshape(3)
@@ -385,26 +416,22 @@ class L_C_control:
     def directional_control_lat(
         self, feedback: FloatScalar, ctrl_sys_lat: Ctrl_Sys_Lat, Xlat: Vec4_1, Xlat_cmd: Vec2_1
     ):
+        """Error used for the integral term with improved stability and limiting."""
         Kv = ctrl_sys_lat.Kv
         F = ctrl_sys_lat.F
         C = ctrl_sys_lat.C
         Cv = ctrl_sys_lat.Cv
-        self.lat_dot = jnp.dot(F, Xlat_cmd) - jnp.dot(C, Xlat) + jnp.dot(Kv, (feedback - jnp.dot(Cv, Xlat)))
+        
+        # Calculate raw error
+        raw_error = jnp.dot(F, Xlat_cmd) - jnp.dot(C, Xlat) + jnp.dot(Kv, (feedback - jnp.dot(Cv, Xlat)))
+        
+        # Prevent excessive error growth - limit maximum error rate
+        max_error_rate = jnp.array([5.0, 5.0, 5.0])  # Maximum error rate limits
+        
+        # Normalize large errors
+        self.lat_dot = jnp.clip(raw_error, -max_error_rate, max_error_rate)
+        
         return self.lat_dot
-
-    # def directional_control_lat_inte(self, time, y):
-    #     Ki = self.ctrl_sys_lat.Ki
-    #     Kx = self.ctrl_sys_lat.Kx
-    #     G = self.ctrl_sys_lat.G
-    #     mdes_lat = jnp.dot(G, self.Xlat_cmd).reshape(3) + jnp.dot(Ki, y) - jnp.dot(Kx, self.Xlat).reshape(3)
-    #     XU_IC = jnp.concatenate([self.X0, self.U0])
-    #     ctrl_sys = Ctrl_Sys(ctrl_sys_lon = self.ctrl_sys_lon, ctrl_sys_lat = self.ctrl_sys_lat)
-    #     X = jnp.concatenate([self.Xlon, self.Xlat])
-    #     mdes = jnp.concatenate([self.mdes_lon, mdes_lat])
-    #     adaptive = jnp.zeros(6)
-    #     m_adapt = mdes + adaptive
-    #     engCmd, surfCmd, feedback, u_alloc = self.pseudo_inverse_control_allocation(XU_IC, ctrl_sys, m_adapt)
-    #     return self.directional_control_lat(feedback[1]).reshape(3)
 
     def directional_control_lat_inte(self, time, y):
         return self.lat_dot.reshape(3)
