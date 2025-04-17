@@ -22,5 +22,5 @@ path(genpath('Exec_Scripts'), path);
 addpath ./vehicles;
 addpath ./Bez_Functions;
 addpath ./Challenge_Problems/;
-
-
+addpath ./latlon_manage;
+addpath ./publish;

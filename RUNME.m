@@ -1,7 +1,7 @@
 % This script is a toplevel script that executes the users desired example case:
 
 addpath('./Exec_Scripts/');
-u_choice = input(sprintf('Specify the desired example case to run:\n\t(1) Sinusoidal Timeseries\n\t(2) Hover to Transition Timeseries\n\t(3) Cruise Climbing Turn Timeseries\n\t(4) Ramp demo\n\t(5) Piecewise Bezier Trajectory\nUser Input: '));
+u_choice = input(sprintf('Specify the desired example case to run:\n\t(1) Sinusoidal Timeseries\n\t(2) Hover to Transition Timeseries\n\t(3) Cruise Climbing Turn Timeseries\n\t(4) Ramp demo\n\t(5) Piecewise Bezier Trajectory\n\t(6) ECEF Trajectory\nUser Input: '));
 
 switch u_choice
     case 1
@@ -17,6 +17,8 @@ switch u_choice
             addpath('./Bez_Functions/');
         end
         exam_Bezier;
+    case 6
+        run_ecef_trajectory;
     otherwise
         fprintf('User needs to supply selection choice (1-5)\n')
         return
