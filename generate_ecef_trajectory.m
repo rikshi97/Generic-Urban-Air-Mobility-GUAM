@@ -16,7 +16,7 @@ if nargin < 1
     csv_file = 'wp_BN.csv';
 end
 if nargin < 2
-    flight_duration = 2400; % 40 minutes flight
+    flight_duration = 40 * 60; % 40 minutes flight
 end
 
 % Constants
@@ -54,7 +54,7 @@ try
     SimIn.turbType = 'None'; % Turbulence model
     SimIn.ctrlType = 'BASELINE'; % Controller type
     SimIn.actType = 'FirstOrder'; % Actuator type
-    SimIn.propType = 'None'; % Propulsion model
+    SimIn.propType = 'FirstOrder'; % Propulsion model
     SimIn.eomType = 'Simple'; % Equations of motion type
     SimIn.sensorType = 'None'; % Sensor model
     
@@ -154,41 +154,127 @@ try
     end
     fprintf('Coordinate conversion complete.\n');
     
-    % Create time points for the trajectory
-    time_points = linspace(0, flight_duration, num_points);
+    % Convert ECEF to NED using first point as reference
+    ref_lla = lla(1,:); % Reference point (first waypoint)
+    ned = zeros(size(ecef));
+    
+    fprintf('Converting ECEF to NED coordinates...\n');
+    for i = 1:size(ecef,1)
+        % Convert current ECEF point to NED
+        current_lla = lla(i,:);
+        ned(i,:) = lla2ned(current_lla, ref_lla, 'flat');
+    end
+    
+    % Convert to feet for consistency with GUAM
+    ned_ft = ned * 3.28084; % Convert meters to feet
     
     % Create waypoints for Bezier curve
     % Each waypoint needs [position, velocity, acceleration]
-    wptsX = zeros(num_points, 3);
-    wptsY = zeros(num_points, 3);
-    wptsZ = zeros(num_points, 3);
+    % Format: 3 x N matrix where each column is [pos; vel; acc]
+    num_states = 3; % [position, velocity, acceleration]
+    wptsX = zeros(num_states, num_points);
+    wptsY = zeros(num_states, num_points);
+    wptsZ = zeros(num_states, num_points);
     
-    % Position components in ECEF
-    wptsX(:,1) = ecef(:,1); % X
-    wptsY(:,1) = ecef(:,2); % Y
-    wptsZ(:,1) = ecef(:,3); % Z
+    % Position components in NED (feet)
+    wptsX(1,:) = ned_ft(:,1)'; % North positions
+    wptsY(1,:) = ned_ft(:,2)'; % East positions
+    wptsZ(1,:) = -ned_ft(:,3)'; % Down positions (negative for altitude)
     
-    % Calculate velocities using central differences
-    dt = diff(time_points);
-    for i = 2:num_points-1
-        wptsX(i,2) = (wptsX(i+1,1) - wptsX(i-1,1)) / (dt(i-1) + dt(i));
-        wptsY(i,2) = (wptsY(i+1,1) - wptsY(i-1,1)) / (dt(i-1) + dt(i));
-        wptsZ(i,2) = (wptsZ(i+1,1) - wptsZ(i-1,1)) / (dt(i-1) + dt(i));
+    % Define speeds in feet/s
+    cruise_speed = 5 * 3.28084; % ft/s
+    climb_speed = 2 * 3.28084;  % ft/s
+    descent_speed = 2 * 3.28084; % ft/s
+    
+    % Calculate distances between waypoints
+    distances = zeros(num_points-1, 1);
+    for i = 1:num_points-1
+        distances(i) = norm(ned_ft(i+1,:) - ned_ft(i,:));
     end
     
-    % Handle endpoints
-    wptsX(1,2) = (wptsX(2,1) - wptsX(1,1)) / dt(1);
-    wptsY(1,2) = (wptsY(2,1) - wptsY(1,1)) / dt(1);
-    wptsZ(1,2) = (wptsZ(2,1) - wptsZ(1,1)) / dt(1);
+    % Calculate total distance
+    total_distance = sum(distances);
     
-    wptsX(end,2) = (wptsX(end,1) - wptsX(end-1,1)) / dt(end);
-    wptsY(end,2) = (wptsY(end,1) - wptsY(end-1,1)) / dt(end);
-    wptsZ(end,2) = (wptsZ(end,1) - wptsZ(end-1,1)) / dt(end);
+    % Calculate time intervals based on cruise speed
+    dt = distances / cruise_speed;
     
-    % Set accelerations to zero (can be improved if needed)
-    wptsX(:,3) = 0;
-    wptsY(:,3) = 0;
-    wptsZ(:,3) = 0;
+    % Add extra time for acceleration/deceleration
+    dt = dt * 2.0; % Add 100% more time for even smoother transitions
+    
+    % Reconstruct time points based on calculated intervals
+    time_points = [0; cumsum(dt)];
+    
+    % Set velocities for specific waypoints
+    % First waypoint - zero velocity
+    wptsX(2,1) = 0;
+    wptsY(2,1) = 0;
+    wptsZ(2,1) = 0;
+    
+    % Second waypoint - initial climb velocity (very smooth)
+    direction = (ned_ft(2,:) - ned_ft(1,:)) / norm(ned_ft(2,:) - ned_ft(1,:));
+    wptsX(2,2) = direction(1) * climb_speed * 0.5; % Further reduce initial velocity
+    wptsY(2,2) = direction(2) * climb_speed * 0.5;
+    wptsZ(2,2) = -direction(3) * climb_speed * 0.5; % Negative for altitude
+    
+    % Second to last waypoint - descent velocity (very smooth)
+    direction = (ned_ft(end-1,:) - ned_ft(end-2,:)) / norm(ned_ft(end-1,:) - ned_ft(end-2,:));
+    wptsX(2,end-1) = direction(1) * descent_speed * 0.5;
+    wptsY(2,end-1) = direction(2) * descent_speed * 0.5;
+    wptsZ(2,end-1) = -direction(3) * descent_speed * 0.5; % Negative for altitude
+    
+    % Last waypoint - zero velocity
+    wptsX(2,end) = 0;
+    wptsY(2,end) = 0;
+    wptsZ(2,end) = 0;
+    
+    % Set cruise velocities for remaining waypoints with smooth transitions
+    for i = 3:num_points-2
+        % Calculate direction vector using previous and next points for smoother path
+        prev_dir = (ned_ft(i,:) - ned_ft(i-1,:)) / norm(ned_ft(i,:) - ned_ft(i-1,:));
+        next_dir = (ned_ft(i+1,:) - ned_ft(i,:)) / norm(ned_ft(i+1,:) - ned_ft(i,:));
+        
+        % Average the directions for smoother transition
+        direction = (prev_dir + next_dir) / 2;
+        direction = direction / norm(direction);
+        
+        % Calculate speed factor based on turn angle
+        turn_angle = acos(dot(prev_dir, next_dir));
+        speed_factor = cos(turn_angle/2)^2; % More aggressive speed reduction in turns
+        
+        % Set velocity components with smooth transition
+        wptsX(2,i) = direction(1) * cruise_speed * speed_factor;
+        wptsY(2,i) = direction(2) * cruise_speed * speed_factor;
+        wptsZ(2,i) = -direction(3) * cruise_speed * speed_factor; % Negative for altitude
+    end
+    
+    % Set accelerations for smoother transitions
+    % Calculate accelerations based on velocity changes
+    for i = 2:num_points-1
+        dt_i = time_points(i+1) - time_points(i);
+        
+        % X acceleration
+        v_diff_x = wptsX(2,i+1) - wptsX(2,i);
+        wptsX(3,i) = v_diff_x / dt_i * 0.5; % Reduce acceleration magnitude
+        
+        % Y acceleration
+        v_diff_y = wptsY(2,i+1) - wptsY(2,i);
+        wptsY(3,i) = v_diff_y / dt_i * 0.5;
+        
+        % Z acceleration
+        v_diff_z = wptsZ(2,i+1) - wptsZ(2,i);
+        wptsZ(3,i) = v_diff_z / dt_i * 0.5;
+    end
+    
+    % Set first and last point accelerations to zero
+    wptsX(3,1) = 0;
+    wptsY(3,1) = 0;
+    wptsZ(3,1) = 0;
+    wptsX(3,end) = 0;
+    wptsY(3,end) = 0;
+    wptsZ(3,end) = 0;
+    
+    % Ensure time points are row vectors for Simulink
+    time_points = time_points';
     
     % Create the trajectory structure
     pwcurve.waypoints = {wptsX, wptsY, wptsZ};
@@ -198,34 +284,49 @@ try
     save('ecef_trajectory.mat', 'pwcurve', '-v7.3');
     fprintf('Successfully generated and saved ECEF trajectory.\n');
     
-    % Plot the trajectory for verification in 3D ECEF coordinates
+    % Plot the trajectory for verification in NED coordinates
     try
         % Create a new figure with specific size
-        fig = figure('Visible', 'off', 'Position', [100 100 800 600]);
+        fig = figure('Visible', 'off', 'Position', [100 100 1200 800]);
         
         % Create the 3D plot
-        plot3(wptsX(:,1), wptsY(:,1), wptsZ(:,1), 'b-', 'LineWidth', 2);
+        plot3(ned_ft(:,2), ned_ft(:,1), -ned_ft(:,3), 'b-', 'LineWidth', 2);
         hold on;
-        scatter3(wptsX(1,1), wptsY(1,1), wptsZ(1,1), 100, 'g', 'filled'); % Start point
-        scatter3(wptsX(end,1), wptsY(end,1), wptsZ(end,1), 100, 'r', 'filled'); % End point
+        scatter3(ned_ft(1,2), ned_ft(1,1), -ned_ft(1,3), 100, 'g', 'filled'); % Start point
+        scatter3(ned_ft(end,2), ned_ft(end,1), -ned_ft(end,3), 100, 'r', 'filled'); % End point
         
         % Add labels and title
-        xlabel('X (m)', 'FontSize', 12);
-        ylabel('Y (m)', 'FontSize', 12);
-        zlabel('Z (m)', 'FontSize', 12);
-        title('3D Trajectory in ECEF Coordinates', 'FontSize', 14);
+        xlabel('East (ft)', 'FontSize', 12);
+        ylabel('North (ft)', 'FontSize', 12);
+        zlabel('Up (ft)', 'FontSize', 12);
+        title('3D Trajectory in NED Coordinates', 'FontSize', 14);
         
         % Customize the plot
         grid on;
         axis equal;
-        view(45, 30); % Set view angle
+        
+        % Calculate appropriate view angle based on trajectory
+        if max(ned_ft(:,3)) - min(ned_ft(:,3)) < 100
+            % If trajectory is mostly horizontal, use top-down view
+            view(0, 90);
+        else
+            % Otherwise use 3D view
+            view(45, 30);
+        end
         
         % Add legend
         legend('Trajectory', 'Start Point', 'End Point', 'Location', 'best');
         
+        % Add ground reference
+        x_lim = xlim;
+        y_lim = ylim;
+        [X,Y] = meshgrid(linspace(x_lim(1), x_lim(2), 20), linspace(y_lim(1), y_lim(2), 20));
+        Z = zeros(size(X));
+        surf(X, Y, Z, 'FaceAlpha', 0.1, 'EdgeColor', 'none', 'FaceColor', 'k');
+        
         % Save the figure
-        print('ecef_trajectory_verification', '-dpng', '-r300');
-        fprintf('Successfully saved trajectory verification plot.\n');
+        print('ned_trajectory_verification', '-dpng', '-r300');
+        fprintf('Successfully saved NED trajectory verification plot.\n');
         
         % Close the figure
         close(fig);

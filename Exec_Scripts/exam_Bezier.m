@@ -37,7 +37,8 @@ while ~pick_flag
             target.RefInput.trajectory.refTime = [0 40];
 
             % Plot the sample PW Bezier curve that was created (see visualization of trajectory and derivatives)
-            Plot_PW_Bezier;
+            Plot_PW_Bezier_SaveFigures;
+            %Plot_PW_Bezier;
             clear wptsX wptsY wptsZ time_wptsX time_wptsY time_wptsZ 
             userStruct.trajFile = ''; % Delete user specified PW Bezier file
 
@@ -70,7 +71,7 @@ while ~pick_flag
             userStruct.trajFile = './Exec_Scripts/exam_PW_Bezier_Traj.mat';
     
             % Plot the sample PW Bezier curve that was created (see visualization of trajectory and derivatives)
-            Plot_PW_Bezier;
+            Plot_PW_Bezier_SaveFigures;
             clear pwcurve wptsX wptsY wptsZ time_wptsX time_wptsY time_wptsZ 
 
             pick_flag = 1; % Exit while loop as user selected Bezier method

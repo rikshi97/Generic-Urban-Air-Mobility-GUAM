@@ -22,8 +22,8 @@ target.RefInput.Bezier = struct();
 target.RefInput.Bezier.waypoints = {wptsX, wptsY, wptsZ};
 target.RefInput.Bezier.time_wpts = {time_wptsX, time_wptsY, time_wptsZ};
 
-% Set initial conditions
-target.RefInput.Vel_bIc_des = [wptsX(1,2); wptsY(1,2); wptsZ(1,2)]; % Initial velocity
+% Set initial conditions (using first position and second velocity)
+target.RefInput.Vel_bIc_des = [wptsX(2,1); wptsY(2,1); wptsZ(2,1)]; % Initial velocity
 target.RefInput.pos_des = [wptsX(1,1); wptsY(1,1); wptsZ(1,1)]; % Initial position
 target.RefInput.chi_des = 0; % Initial heading
 target.RefInput.chi_dot_des = 0; % Initial heading rate
@@ -67,8 +67,8 @@ wptsX = target.RefInput.Bezier.waypoints{1};
 wptsY = target.RefInput.Bezier.waypoints{2};
 wptsZ = target.RefInput.Bezier.waypoints{3};
 
-if size(wptsX, 2) ~= 3 || size(wptsY, 2) ~= 3 || size(wptsZ, 2) ~= 3
-    error('Waypoints must have 3 columns: [position, velocity, acceleration]');
+if size(wptsX, 1) ~= 3 || size(wptsY, 1) ~= 3 || size(wptsZ, 1) ~= 3
+    error('Waypoints must have 3 rows: [position, velocity, acceleration]');
 end
 
 end 
